@@ -122,6 +122,26 @@
 			// The request type doesn't match (GET vs. POST)
 			return null;
 		}
+		
+		// Inspect headers submitted   
+    if ( handler && handler.headers) {
+  		// First trigger beforeSend on xhr which might also set headers
+  		var headerHandler = $.extend(true, {}, handler)
+  		requestSettings.beforeSend(xhr(headerHandler, requestSettings, null, null))
+      // Invoke a custom header checks
+      if ( $.isFunction(handler.headerCheck)  ) {
+        var acceptedHeader = handler.headerCheck.call( requestSettings, handler.headers, headerHandler.headers ) /* function( requestHeaders, serverHeaders ) return true to return the mock or false to not return mock */
+        if (!acceptedHeader){
+          return null
+        }
+      }
+      
+      // simple Accept only header check - could be more complex as needed
+      if  ( handler.headers['Accept'] != headerHandler.headers['Accept']) {
+        // The accept header isn't accepted, do not mock this request
+        return null;
+      }            
+    }
 
 		return handler;
 	}
@@ -147,7 +167,7 @@
 					this.readyState 	= 4;
 
 					// We have an executable function, call it to give
-					// the mock handler a chance to update it's data
+					// the mock handler a chance to update its data
 					if ( $.isFunction(mockHandler.response) ) {
 						mockHandler.response(origSettings);
 					}
@@ -426,19 +446,19 @@
 		// Iterate over our mock handlers (in registration order) until we find
 		// one that is willing to intercept the request
 		for(var k = 0; k < mockHandlers.length; k++) {
+
 			if ( !mockHandlers[k] ) {
 				continue;
 			}
-			
+						
 			mockHandler = getMockForRequest( mockHandlers[k], requestSettings );
+			
 			if(!mockHandler) {
-				// No valid mock found for this request
-				continue;
+        continue;
 			}
 
 			// Handle console logging
 			logMock( mockHandler, requestSettings );
-
 
 			if ( requestSettings.dataType === "jsonp" ) {
 				if ((mockRequest = processJsonpMock( requestSettings, mockHandler, origSettings ))) {
@@ -446,7 +466,6 @@
 					return mockRequest;
 				}
 			}
-
 
 			// Removed to fix #54 - keep the mocking data object intact
 			//mockHandler.data = requestSettings.data;
@@ -461,12 +480,22 @@
 					xhr: function() { return xhr( mockHandler, requestSettings, origSettings, origHandler ) }
 				}));
 			})(mockHandler, requestSettings, origSettings, mockHandlers[k]);
-
+      
 			return mockRequest;
 		}
 
-		// We don't have a mock request, trigger a normal request
-		return _ajax.apply($, [origSettings]);
+		// No valid mock found for this request				
+    if ($.extend({}, $.mockjaxSettings, mockHandler).useAjax) {    			
+  	  // We don't have a mock request and want to trigger a normal request
+  	  return _ajax.apply($, [origSettings]);      
+    }
+
+    // setup the promise to return a fail on mocked xhr
+    var failed = new $.Deferred();
+    // Handle console logging
+		logMock( mockHandler, requestSettings );
+    failed.reject(null /* no jqXhr*/, 'Error', 'The resource doesn\'t support the required interface (Mockjax: no mockRequest matched) on ' + origSettings.url);
+    return failed.promise(); 
 	}
 
 
@@ -479,6 +508,7 @@
 	$.mockjaxSettings = {
 		//url:        null,
 		//type:       'GET',
+
 		log:          function(msg) {
 										window['console'] && window.console.log && window.console.log(msg);
 					  			},
@@ -498,7 +528,9 @@
 		headers: {
 			etag: 'IJF@H#@923uf8023hFO@I#H#',
 			'content-type' : 'text/plain'
-		}
+		},
+		// call through to normal ajax request if there isn't a mock matched
+		useAjax: true
 	};
 
 	$.mockjax = function(settings) {
